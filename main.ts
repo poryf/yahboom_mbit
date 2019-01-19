@@ -1,243 +1,632 @@
-﻿/*
-Copyright (C): 2010-2019, Shenzhen Yahboom Tech
-modified from liusen
-load dependency
-"mbit": "file:../pxt-mbit"
+/**
+* makecode I2C LCD1602 package for microbit.
+* From microbit/micropython Chinese community.
+* http://www.micropython.org.cn
 */
 
+/**
+ * Custom blocks
+ */
+//% weight=20 color=#0fbc11 icon="▀"
+namespace LCD1602显示屏 {
+    let i2cAddr: number // 0x3F: PCF8574A, 0x27: PCF8574
+    let BK: number      // backlight control
+    let RS: number      // command/data
 
-
-//% color="#C814B8" weight=25 icon="\uf1d4"
-namespace mbit_显示类 {
-    
-    export enum enColor {
-
-        //% blockId="OFF" block="灭"
-        OFF = 0,
-        //% blockId="Red" block="红色"
-        Red,
-        //% blockId="Green" block="绿色"
-        Green,
-        //% blockId="Blue" block="蓝色"
-        Blue,
-        //% blockId="White" block="白色"
-        White,
-        //% blockId="Cyan" block="青色"
-        Cyan,
-        //% blockId="Pinkish" block="品红"
-        Pinkish,
-        //% blockId="Yellow" block="黄色"
-        Yellow,
-
-    }
-    export enum enLED1 {
-        
-        //% blockId="OFF" block="灭"
-        OFF = 0,
-        //% blockId="ON" block="亮"
-        ON =1
+    // set LCD reg
+    function setreg(d: number) {
+        pins.i2cWriteNumber(i2cAddr, d, NumberFormat.Int8LE)
+        basic.pause(1)
     }
 
-    //% blockId=mbit_LED1 block="LED1|pin %pin|value %value"
-    //% weight=5
-    //% blockGap=8
-    //% color="#C814B8"
-    //% name.fieldEditor="gridpicker" name.fieldOptions.columns=1
-    export function LED1(pin: DigitalPin, value: enLED1): void {
-
-        pins.digitalWritePin(pin, value);
-
+    // send data to I2C bus
+    function set(d: number) {
+        d = d & 0xF0
+        d = d + BK + RS
+        setreg(d)
+        setreg(d + 4)
+        setreg(d)
     }
 
-    //% blockId=mbit_LED2 block="LED2|pin %pin|value %value"
-    //% weight=4
-    //% blockGap=8
-    //% color="#C814B8"
-    //% value.min=0 value.max=255
-    //% name.fieldEditor="gridpicker" name.fieldOptions.columns=2
-    export function LED2(pin: AnalogPin, value: number): void {
-
-        pins.analogWritePin(pin, value * 1024 / 256);
-
+    // send command
+    function cmd(d: number) {
+        RS = 0
+        set(d)
+        set(d << 4)
     }
 
-    //% blockId=mbit_BreathLED block="BreathLED|pin %pin"
-    //% weight=3
-    //% blockGap=8
-    //% color="#C814B8"
-    //% name.fieldEditor="gridpicker" name.fieldOptions.columns=3
-    export function BreathLED(pin: AnalogPin): void {
+    // send data
+    function dat(d: number) {
+        RS = 1
+        set(d)
+        set(d << 4)
+    }
 
-        for (let i: number = 0; i < 1023; i++) {
-            pins.analogWritePin(pin, i);
-            //basic.pause(1);
-            control.waitMicros(1000);
+    // auto get LCD address
+    function AutoAddr() {
+        let k = true
+        let addr = 0x20
+        let d1 = 0, d2 = 0
+        while (k && (addr < 0x28)) {
+            pins.i2cWriteNumber(addr, -1, NumberFormat.Int32LE)
+            d1 = pins.i2cReadNumber(addr, NumberFormat.Int8LE) % 16
+            pins.i2cWriteNumber(addr, 0, NumberFormat.Int16LE)
+            d2 = pins.i2cReadNumber(addr, NumberFormat.Int8LE)
+            if ((d1 == 7) && (d2 == 0)) k = false
+            else addr += 1
         }
-        basic.pause(10);
-        for (let i: number = 1023; i > 0; i--) {
-            pins.analogWritePin(pin, i);
-            //basic.pause(1);
-            control.waitMicros(1000);
+        if (!k) return addr
+
+        addr = 0x38
+        while (k && (addr < 0x40)) {
+            pins.i2cWriteNumber(addr, -1, NumberFormat.Int32LE)
+            d1 = pins.i2cReadNumber(addr, NumberFormat.Int8LE) % 16
+            pins.i2cWriteNumber(addr, 0, NumberFormat.Int16LE)
+            d2 = pins.i2cReadNumber(addr, NumberFormat.Int8LE)
+            if ((d1 == 7) && (d2 == 0)) k = false
+            else addr += 1
         }
+        if (!k) return addr
+        else return 0
 
     }
 
-    //% blockId=mbit_RGB block="RGB|pin1 %pin1|pin2 %pin2|pin3 %pin3|value1 %value1|value2 %value2|value3 %value3"
-    //% weight=2
-    //% blockGap=8
-    //% color="#C814B8"
-    //% value1.min=0 value1.max=255 value2.min=0 value2.max=255 value3.min=0 value3.max=255
-    //% name.fieldEditor="gridpicker" name.fieldOptions.columns=4
-    export function RGB(pin1: AnalogPin, pin2: AnalogPin, pin3: AnalogPin, value1: number, value2: number, value3: number): void {
-
-        pins.analogWritePin(pin1, value1 * 1024 / 256);
-        pins.analogWritePin(pin2, value2 * 1024 / 256);
-        pins.analogWritePin(pin3, value3 * 1024 / 256);
-
+    /**
+     * initial LCD, set I2C address. Address is 39/63 for PCF8574/PCF8574A
+     * @param Addr is i2c address for LCD, eg: 0, 39, 63. 0 is auto find address
+     */
+    //% blockId="I2C_LCD1620_SET_ADDRESS" block="设置显示屏地址为 %addr"
+    //% weight=100 blockGap=8
+    //% parts=LCD1602_I2C trackArgs=0
+    export function LcdInit(Addr: number) {
+        if (Addr == 0) i2cAddr = AutoAddr()
+        else i2cAddr = Addr
+        BK = 8
+        RS = 0
+        cmd(0x33)       // set 4bit mode
+        basic.pause(5)
+        set(0x30)
+        basic.pause(5)
+        set(0x20)
+        basic.pause(5)
+        cmd(0x28)       // set mode
+        cmd(0x0C)
+        cmd(0x06)
+        cmd(0x01)       // clear
     }
-    //% blockId=mbit_RGB2 block="RGB|pin1 %pin1|pin2 %pin2|pin3 %pin3|value %value"
-    //% weight=1
-    //% blockGap=8
-    //% color="#C814B8"
-    //% name.fieldEditor="gridpicker" name.fieldOptions.columns=4
-    export function RGB2(pin1: DigitalPin, pin2: DigitalPin, pin3: DigitalPin, value: enColor): void {
 
-        switch (value) {
-            case enColor.OFF: {
-                pins.digitalWritePin(pin1, 0);
-                pins.digitalWritePin(pin2, 0);
-                pins.digitalWritePin(pin3, 0);
-                break;
-            }
-            case enColor.Red: {
-                pins.digitalWritePin(pin1, 1);
-                pins.digitalWritePin(pin2, 0);
-                pins.digitalWritePin(pin3, 0);
-                break;
-            }
-            case enColor.Green: {
-                pins.digitalWritePin(pin1, 0);
-                pins.digitalWritePin(pin2, 1);
-                pins.digitalWritePin(pin3, 0);
-                break;
-            }
-            case enColor.Blue: {
-                pins.digitalWritePin(pin1, 0);
-                pins.digitalWritePin(pin2, 0);
-                pins.digitalWritePin(pin3, 1);
-                break;
-            }
-            case enColor.White: {
-                pins.digitalWritePin(pin1, 1);
-                pins.digitalWritePin(pin2, 1);
-                pins.digitalWritePin(pin3, 1);
-                break;
-            }
-            case enColor.Cyan: {
-                pins.digitalWritePin(pin1, 0);
-                pins.digitalWritePin(pin2, 1);
-                pins.digitalWritePin(pin3, 1);
-                break;
-            }
-            case enColor.Pinkish: {
-                pins.digitalWritePin(pin1, 1);
-                pins.digitalWritePin(pin2, 0);
-                pins.digitalWritePin(pin3, 1);
-                break;
-            }
-            case enColor.Yellow: {
-                pins.digitalWritePin(pin1, 1);
-                pins.digitalWritePin(pin2, 1);
-                pins.digitalWritePin(pin3, 0);
-                break;
-            }
+    /**
+     * show a number in LCD at given position
+     * @param n is number will be show, eg: 10, 100, 200
+     * @param x is LCD column position, eg: 0
+     * @param y is LCD row position, eg: 0
+     */
+    //% blockId="I2C_LCD1620_SHOW_NUMBER" block="显示数字 %n|在 x %x|y %y"
+    //% weight=90 blockGap=8
+    //% x.min=0 x.max=15
+    //% y.min=0 y.max=1
+    //% parts=LCD1602_I2C trackArgs=0
+    export function ShowNumber(n: number, x: number, y: number): void {
+        let s = n.toString()
+        ShowString(s, x, y)
+    }
+
+    /**
+     * show a string in LCD at given position
+     * @param s is string will be show, eg: "Hello"
+     * @param x is LCD column position, [0 - 15], eg: 0
+     * @param y is LCD row position, [0 - 1], eg: 0
+     */
+    //% blockId="I2C_LCD1620_SHOW_STRING" block="显示字符串 %s|在 x %x|y %y"
+    //% weight=90 blockGap=8
+    //% x.min=0 x.max=15
+    //% y.min=0 y.max=1
+    //% parts=LCD1602_I2C trackArgs=0
+    export function ShowString(s: string, x: number, y: number): void {
+        let a: number
+
+        if (y > 0)
+            a = 0xC0
+        else
+            a = 0x80
+        a += x
+        cmd(a)
+
+        for (let i = 0; i < s.length; i++) {
+            dat(s.charCodeAt(i))
         }
-
     }
-   
+
+    /**
+     * turn on LCD
+     */
+    //% blockId="I2C_LCD1620_ON" block="开启显示屏"
+    //% weight=81 blockGap=8
+    //% parts=LCD1602_I2C trackArgs=0
+    export function on(): void {
+        cmd(0x0C)
+    }
+
+    /**
+     * turn off LCD
+     */
+    //% blockId="I2C_LCD1620_OFF" block="关闭显示屏"
+    //% weight=80 blockGap=8
+    //% parts=LCD1602_I2C trackArgs=0
+    export function off(): void {
+        cmd(0x08)
+    }
+
+    /**
+     * clear all display content
+     */
+    //% blockId="I2C_LCD1620_CLEAR" block="清空显示屏"
+    //% weight=85 blockGap=8
+    //% parts=LCD1602_I2C trackArgs=0
+    export function clear(): void {
+        cmd(0x01)
+    }
+
+    /**
+     * turn on LCD backlight
+     */
+    //% blockId="I2C_LCD1620_BACKLIGHT_ON" block="打开背光"
+    //% weight=71 blockGap=8
+    //% parts=LCD1602_I2C trackArgs=0
+    export function BacklightOn(): void {
+        BK = 8
+        cmd(0)
+    }
+
+    /**
+     * turn off LCD backlight
+     */
+    //% blockId="I2C_LCD1620_BACKLIGHT_OFF" block="关闭背光"
+    //% weight=70 blockGap=8
+    //% parts=LCD1602_I2C trackArgs=0
+    export function BacklightOff(): void {
+        BK = 0
+        cmd(0)
+    }
+
+    /**
+     * shift left
+     */
+    //% blockId="I2C_LCD1620_SHL" block="左移一位"
+    //% weight=61 blockGap=8
+    //% parts=LCD1602_I2C trackArgs=0
+    export function shl(): void {
+        cmd(0x18)
+    }
+
+    /**
+     * shift right
+     */
+    //% blockId="I2C_LCD1620_SHR" block="右移一位"
+    //% weight=60 blockGap=8
+    //% parts=LCD1602_I2C trackArgs=0
+    export function shr(): void {
+        cmd(0x1C)
+    }
 }
-/*****************************************************************************************************************************************
- *  传感器类 ***************************************************************************************************************************** 
- ****************************************************************************************************************************************/
 
-//% color="#87CEEB" weight=24 icon="\uf1b6"
-namespace mbit_传感器类 {
+/**
+* makecode I2C OLED 128x64 Package.
+* From microbit/micropython Chinese community.
+* http://www.micropython.org.cn
+*/
 
-    export enum enVoice {
-        //% blockId="Voice" block="有声音"
-        Voice = 0,
-        //% blockId="NoVoice" block="无声音"
-        NoVoice = 1
+//% weight=20 color=#0855AA icon="O" 
+namespace OLED12864显示屏 {
+    let font: number[] = [];
+    font[0] = 0x0022d422;
+    font[1] = 0x0022d422;
+    font[2] = 0x0022d422;
+    font[3] = 0x0022d422;
+    font[4] = 0x0022d422;
+    font[5] = 0x0022d422;
+    font[6] = 0x0022d422;
+    font[7] = 0x0022d422;
+    font[8] = 0x0022d422;
+    font[9] = 0x0022d422;
+    font[10] = 0x0022d422;
+    font[11] = 0x0022d422;
+    font[12] = 0x0022d422;
+    font[13] = 0x0022d422;
+    font[14] = 0x0022d422;
+    font[15] = 0x0022d422;
+    font[16] = 0x0022d422;
+    font[17] = 0x0022d422;
+    font[18] = 0x0022d422;
+    font[19] = 0x0022d422;
+    font[20] = 0x0022d422;
+    font[21] = 0x0022d422;
+    font[22] = 0x0022d422;
+    font[23] = 0x0022d422;
+    font[24] = 0x0022d422;
+    font[25] = 0x0022d422;
+    font[26] = 0x0022d422;
+    font[27] = 0x0022d422;
+    font[28] = 0x0022d422;
+    font[29] = 0x0022d422;
+    font[30] = 0x0022d422;
+    font[31] = 0x0022d422;
+    font[32] = 0x00000000;
+    font[33] = 0x000002e0;
+    font[34] = 0x00018060;
+    font[35] = 0x00afabea;
+    font[36] = 0x00aed6ea;
+    font[37] = 0x01991133;
+    font[38] = 0x010556aa;
+    font[39] = 0x00000060;
+    font[40] = 0x000045c0;
+    font[41] = 0x00003a20;
+    font[42] = 0x00051140;
+    font[43] = 0x00023880;
+    font[44] = 0x00002200;
+    font[45] = 0x00021080;
+    font[46] = 0x00000100;
+    font[47] = 0x00111110;
+    font[48] = 0x0007462e;
+    font[49] = 0x00087e40;
+    font[50] = 0x000956b9;
+    font[51] = 0x0005d629;
+    font[52] = 0x008fa54c;
+    font[53] = 0x009ad6b7;
+    font[54] = 0x008ada88;
+    font[55] = 0x00119531;
+    font[56] = 0x00aad6aa;
+    font[57] = 0x0022b6a2;
+    font[58] = 0x00000140;
+    font[59] = 0x00002a00;
+    font[60] = 0x0008a880;
+    font[61] = 0x00052940;
+    font[62] = 0x00022a20;
+    font[63] = 0x0022d422;
+    font[64] = 0x00e4d62e;
+    font[65] = 0x000f14be;
+    font[66] = 0x000556bf;
+    font[67] = 0x0008c62e;
+    font[68] = 0x0007463f;
+    font[69] = 0x0008d6bf;
+    font[70] = 0x000094bf;
+    font[71] = 0x00cac62e;
+    font[72] = 0x000f909f;
+    font[73] = 0x000047f1;
+    font[74] = 0x0017c629;
+    font[75] = 0x0008a89f;
+    font[76] = 0x0008421f;
+    font[77] = 0x01f1105f;
+    font[78] = 0x01f4105f;
+    font[79] = 0x0007462e;
+    font[80] = 0x000114bf;
+    font[81] = 0x000b6526;
+    font[82] = 0x010514bf;
+    font[83] = 0x0004d6b2;
+    font[84] = 0x0010fc21;
+    font[85] = 0x0007c20f;
+    font[86] = 0x00744107;
+    font[87] = 0x01f4111f;
+    font[88] = 0x000d909b;
+    font[89] = 0x00117041;
+    font[90] = 0x0008ceb9;
+    font[91] = 0x0008c7e0;
+    font[92] = 0x01041041;
+    font[93] = 0x000fc620;
+    font[94] = 0x00010440;
+    font[95] = 0x01084210;
+    font[96] = 0x00000820;
+    font[97] = 0x010f4a4c;
+    font[98] = 0x0004529f;
+    font[99] = 0x00094a4c;
+    font[100] = 0x000fd288;
+    font[101] = 0x000956ae;
+    font[102] = 0x000097c4;
+    font[103] = 0x0007d6a2;
+    font[104] = 0x000c109f;
+    font[105] = 0x000003a0;
+    font[106] = 0x0006c200;
+    font[107] = 0x0008289f;
+    font[108] = 0x000841e0;
+    font[109] = 0x01e1105e;
+    font[110] = 0x000e085e;
+    font[111] = 0x00064a4c;
+    font[112] = 0x0002295e;
+    font[113] = 0x000f2944;
+    font[114] = 0x0001085c;
+    font[115] = 0x00012a90;
+    font[116] = 0x010a51e0;
+    font[117] = 0x010f420e;
+    font[118] = 0x00644106;
+    font[119] = 0x01e8221e;
+    font[120] = 0x00093192;
+    font[121] = 0x00222292;
+    font[122] = 0x00095b52;
+    font[123] = 0x0008fc80;
+    font[124] = 0x000003e0;
+    font[125] = 0x000013f1;
+    font[126] = 0x00841080;
+    font[127] = 0x0022d422;
+
+    let _I2CAddr = 0;
+    let _screen = pins.createBuffer(1025);
+    let _buf2 = pins.createBuffer(2);
+    let _buf3 = pins.createBuffer(3);
+    let _buf4 = pins.createBuffer(4);
+    let _ZOOM = 1;
+
+    function cmd1(d: number) {
+        let n = d % 256;
+        pins.i2cWriteNumber(_I2CAddr, n, NumberFormat.UInt16BE);
     }
 
-    export enum enIR {
-        //% blockId="Get" block="检测到"
-        Get = 0,
-        //% blockId="NoVoice" block="未检测"
-        NoGet = 1
+    function cmd2(d1: number, d2: number) {
+        _buf3[0] = 0;
+        _buf3[1] = d1;
+        _buf3[2] = d2;
+        pins.i2cWriteBuffer(_I2CAddr, _buf3);
     }
-    
 
-    //% blockId=mbit_Voice_Sensor block="Voice_Sensor|pin %pin|value %value"
-    //% weight=100
-    //% blockGap=10
-    //% color="#87CEEB"
-    //% name.fieldEditor="gridpicker" name.fieldOptions.columns=4
-    export function Voice_Sensor(pin: DigitalPin, value: enVoice): boolean {
+    function cmd3(d1: number, d2: number, d3: number) {
+        _buf4[0] = 0;
+        _buf4[1] = d1;
+        _buf4[2] = d2;
+        _buf4[3] = d3;
+        pins.i2cWriteBuffer(_I2CAddr, _buf4);
+    }
 
-        pins.setPull(pin, PinPullMode.PullUp);
-        if (pins.digitalReadPin(pin) == value) {
-            return true;
+    function set_pos(col: number = 0, page: number = 0) {
+        cmd1(0xb0 | page) // page number
+        let c = col * (_ZOOM + 1)
+        cmd1(0x00 | (c % 16)) // lower start column address
+        cmd1(0x10 | (c >> 4)) // upper start column address    
+    }
+
+    // clear bit
+    function clrbit(d: number, b: number): number {
+        if (d & (1 << b))
+            d -= (1 << b)
+        return d
+    }
+
+    /**
+     * set pixel in OLED
+     * @param x is X alis, eg: 0
+     * @param y is Y alis, eg: 0
+     * @param color is dot color, eg: 1
+     */
+    //% blockId="OLED12864_I2C_PIXEL" block="点亮像素点在 x %x|y %y|是否翻转 %color"
+    //% weight=70 blockGap=8
+    //% parts=OLED12864_I2C trackArgs=0
+    export function pixel(x: number, y: number, color: number = 1) {
+        let page = y >> 3
+        let shift_page = y % 8
+        let ind = x * (_ZOOM + 1) + page * 128 + 1
+        let b = (color) ? (_screen[ind] | (1 << shift_page)) : clrbit(_screen[ind], shift_page)
+        _screen[ind] = b
+        set_pos(x, page)
+        if (_ZOOM) {
+            _screen[ind + 1] = b
+            _buf3[0] = 0x40
+            _buf3[1] = _buf3[2] = b
+            pins.i2cWriteBuffer(_I2CAddr, _buf3)
         }
         else {
-            return false;
-        }
-
-    }
-
-    function IR_send_38k() {
-        for (let i: number = 0; i < 8; i++) {
-            pins.digitalWritePin(DigitalPin.P9, 1);
-            control.waitMicros(13);
-            pins.digitalWritePin(DigitalPin.P9, 0);
-            control.waitMicros(13);
+            _buf2[0] = 0x40
+            _buf2[1] = b
+            pins.i2cWriteBuffer(_I2CAddr, _buf2)
         }
     }
-    //% blockId=mbit_IR_Sensor block="IR_Sensor|pin %pin| |%value|障碍物"
+
+    /**
+     * show text in OLED
+     * @param x is X alis, eg: 0
+     * @param y is Y alis, eg: 0
+     * @param s is the text will be show, eg: 'Hello!'
+     * @param color is string color, eg: 1
+     */
+    //% blockId="OLED12864_I2C_SHOWSTRING" block="显示字符串在 x %x|y %y|字符串 %s|是否翻转 %color"
+    //% weight=80 blockGap=8
+    //% parts=OLED12864_I2C trackArgs=0
+    export function showString(x: number, y: number, s: string, color: number = 1) {
+        let col = 0
+        let p = 0
+        let ind = 0
+        for (let n = 0; n < s.length; n++) {
+            p = font[s.charCodeAt(n)]
+            for (let i = 0; i < 5; i++) {
+                col = 0
+                for (let j = 0; j < 5; j++) {
+                    if (p & (1 << (5 * i + j)))
+                        col |= (1 << (j + 1))
+                }
+                ind = (x + n) * 5 * (_ZOOM + 1) + y * 128 + i * (_ZOOM + 1) + 1
+                if (color == 0)
+                    col = 255 - col
+                _screen[ind] = col
+                if (_ZOOM)
+                    _screen[ind + 1] = col
+            }
+        }
+        set_pos(x * 5, y)
+        let ind0 = x * 5 * (_ZOOM + 1) + y * 128
+        let buf = _screen.slice(ind0, ind + 1)
+        buf[0] = 0x40
+        pins.i2cWriteBuffer(_I2CAddr, buf)
+    }
+
+    /**
+     * show a number in OLED
+     * @param x is X alis, eg: 0
+     * @param y is Y alis, eg: 0
+     * @param num is the number will be show, eg: 12
+     * @param color is number color, eg: 1
+     */
+    //% blockId="OLED12864_I2C_NUMBER" block="显示数字在 x %x|y %y|数字 %num|是否翻转 %color"
+    //% weight=80 blockGap=8
+    //% parts=OLED12864_I2C trackArgs=0
+    export function showNumber(x: number, y: number, num: number, color: number = 1) {
+        showString(x, y, num.toString(), color)
+    }
+
+    /**
+     * draw a horizontal line
+     * @param x is X alis, eg: 0
+     * @param y is Y alis, eg: 0
+     * @param len is the length of line, eg: 10
+     * @param color is line color, eg: 1
+     */
+    //% blockId="OLED12864_I2C_HLINE" block="画水平线在 x %x|y %y|长度 %len|是否翻转 %color"
+    //% weight=71 blockGap=8
+    //% parts=OLED12864_I2C trackArgs=0
+    export function hline(x: number, y: number, len: number, color: number = 1) {
+        for (let i = x; i < (x + len); i++)
+            pixel(i, y, color)
+    }
+
+    /**
+     * draw a vertical line
+     * @param x is X alis, eg: 0
+     * @param y is Y alis, eg: 0
+     * @param len is the length of line, eg: 10
+     * @param color is line color, eg: 1
+     */
+    //% blockId="OLED12864_I2C_VLINE" block="画竖直线在 x %x|y %y|长度 %len|是否翻转 %color"
+    //% weight=72 blockGap=8
+    //% parts=OLED12864_I2C trackArgs=0
+    export function vline(x: number, y: number, len: number, color: number = 1) {
+        for (let i = y; i < (y + len); i++)
+            pixel(x, i, color)
+    }
+
+    /**
+     * draw a rectangle
+     * @param x1 is X alis, eg: 0
+     * @param y1 is Y alis, eg: 0
+     * @param x2 is X alis, eg: 60
+     * @param y2 is Y alis, eg: 30
+     * @param color is line color, eg: 1
+     */
+    //% blockId="OLED12864_I2C_RECT" block="画矩形在 x1 %x1|y1 %y1|x2 %x2|y2 %y2|是否翻转 %color"
+    //% weight=73 blockGap=8
+    //% parts=OLED12864_I2C trackArgs=0
+    export function rect(x1: number, y1: number, x2: number, y2: number, color: number = 1) {
+        if (x1 > x2)
+            x1 = [x2, x2 = x1][0];
+        if (y1 > y2)
+            y1 = [y2, y2 = y1][0];
+        hline(x1, y1, x2 - x1 + 1, color)
+        hline(x1, y2, x2 - x1 + 1, color)
+        vline(x1, y1, y2 - y1 + 1, color)
+        vline(x2, y1, y2 - y1 + 1, color)
+    }
+
+    /**
+     * invert display
+     * @param d true: invert / false: normal, eg: true
+     */
+    //% blockId="OLED12864_I2C_INVERT" block="点亮全屏 %d"
+    //% weight=65 blockGap=8
+    //% parts=OLED12864_I2C trackArgs=0
+    export function invert(d: boolean = true) {
+        let n = (d) ? 0xA7 : 0xA6
+        cmd1(n)
+    }
+
+    /**
+     * draw / redraw screen
+     */
+    //% blockId="OLED12864_I2C_DRAW" block="draw"
+    //% weight=64 blockGap=8
+    //% parts=OLED12864_I2C trackArgs=0
+    function draw() {
+        set_pos()
+        pins.i2cWriteBuffer(_I2CAddr, _screen)
+    }
+
+    /**
+     * clear screen
+     */
+    //% blockId="OLED12864_I2C_CLEAR" block="清屏"
+    //% weight=63 blockGap=8
+    //% parts=OLED12864_I2C trackArgs=0
+    export function clear() {
+        _screen.fill(0)
+        _screen[0] = 0x40
+        draw()
+    }
+
+    /**
+     * turn on screen
+     */
+    //% blockId="OLED12864_I2C_ON" block="turn on"
+    //% weight=62 blockGap=8
+    //% parts=OLED12864_I2C trackArgs=0
+    function on() {
+        cmd1(0xAF)
+    }
+
+    /**
+     * turn off screen
+     */
+    //% blockId="OLED12864_I2C_OFF" block="turn off"
+    //% weight=61 blockGap=8
+    //% parts=OLED12864_I2C trackArgs=0
+    function off() {
+        cmd1(0xAE)
+    }
+
+    /**
+     * zoom mode
+     * @param d true zoom / false normal, eg: true
+     */
+    //% blockId="OLED12864_I2C_ZOOM" block="是否放大 %d"
+    //% weight=60 blockGap=8
+    //% parts=OLED12864_I2C trackArgs=0
+    export function zoom(d: boolean = true) {
+        _ZOOM = (d) ? 1 : 0
+        cmd2(0xd6, _ZOOM)
+    }
+
+    /**
+     * OLED initialize
+     * @param addr is i2c addr, eg: 60
+     */
+    //% blockId="OLED12864_I2C_init" block="设置显示屏地址为 %addr"
+    //% weight=100 blockGap=8
+    //% parts=OLED12864_I2C trackArgs=0
+    export function init(addr: number) {
+        _I2CAddr = addr;
+        cmd1(0xAE)       // SSD1306_DISPLAYOFF
+        cmd1(0xA4)       // SSD1306_DISPLAYALLON_RESUME
+        cmd2(0xD5, 0xF0) // SSD1306_SETDISPLAYCLOCKDIV
+        cmd2(0xA8, 0x3F) // SSD1306_SETMULTIPLEX
+        cmd2(0xD3, 0x00) // SSD1306_SETDISPLAYOFFSET
+        cmd1(0 | 0x0)    // line #SSD1306_SETSTARTLINE
+        cmd2(0x8D, 0x14) // SSD1306_CHARGEPUMP
+        cmd2(0x20, 0x00) // SSD1306_MEMORYMODE
+        cmd3(0x21, 0, 127) // SSD1306_COLUMNADDR
+        cmd3(0x22, 0, 63)  // SSD1306_PAGEADDR
+        cmd1(0xa0 | 0x1) // SSD1306_SEGREMAP
+        cmd1(0xc8)       // SSD1306_COMSCANDEC
+        cmd2(0xDA, 0x12) // SSD1306_SETCOMPINS
+        cmd2(0x81, 0xCF) // SSD1306_SETCONTRAST
+        cmd2(0xd9, 0xF1) // SSD1306_SETPRECHARGE
+        cmd2(0xDB, 0x40) // SSD1306_SETVCOMDETECT
+        cmd1(0xA6)       // SSD1306_NORMALDISPLAY
+        cmd2(0xD6, 1)    // zoom on
+        cmd1(0xAF)       // SSD1306_DISPLAYON
+        clear()
+        _ZOOM = 1
+    }
+}
+
+//% weight=20 color=#87CEEB icon="8"
+namespace 传感器 {
+    //% blockId=mbit_ultrasonic block="超声波传感器|Trig %Trig|Echo %Echo"
+    //% color="#87CEEB"
     //% weight=100
     //% blockGap=10
-    //% color="#87CEEB"
-    //% name.fieldEditor="gridpicker" name.fieldOptions.columns=4
-    export function IR_Sensor(pin: DigitalPin, value: enIR): boolean {
-
-        pins.setPull(pin, PinPullMode.PullUp);
-        //IR_send_38k();
-        if (pins.digitalReadPin(pin) == value) {
-            return true;
-        }
-        else {
-            return false;
-        }
-
-    }
-
-    //% blockId=mbit_IR_Send block="IR_Send|pin %pin"
-    //% weight=100
-    //% blockGap=10
-    //% color="#87CEEB"
-    //% name.fieldEditor="gridpicker" name.fieldOptions.columns=4
-    export function IR_Send(pin: DigitalPin): void {
-
-        
-        IR_send_38k();
-
-    }
-   
-    //% blockId=mbit_ultrasonic block="Ultrasonic|Trig %Trig|Echo %Echo"
-    //% color="#87CEEB"
-    //% weight=100
-    //% blockGap=10
-    //% name.fieldEditor="gridpicker" name.fieldOptions.columns=4
     export function Ultrasonic(Trig: DigitalPin, Echo: DigitalPin): number {
 
         // send pulse
@@ -250,810 +639,6 @@ namespace mbit_传感器类 {
 
         // read pulse
         let d = pins.pulseIn(Echo, PulseValue.High, 23200);
-        return  Math.floor(d / 58);
-    }
-}
-
-/*****************************************************************************************************************************************
- *  输入类 *****************************************************************************************************************************
- ****************************************************************************************************************************************/
-
-//% color="#808080" weight=23 icon="\uf11c"
-namespace mbit_输入类 {
-
-    export enum enRocker {
-        //% blockId="Nostate" block="无"
-        Nostate = 0,
-        //% blockId="Up" block="上"
-        Up,
-        //% blockId="Down" block="下"
-        Down,
-        //% blockId="Left" block="左"
-        Left,
-        //% blockId="Right" block="右"
-        Right,
-        //% blockId="Press" block="按下"
-        Press
-    }
-
-    export enum enTouch {
-        //% blockId="NoTouch" block="未触摸"
-        NoTouch = 0,
-        //% blockId="Touch" block="触摸"
-        Touch = 1
-    }
-    export enum enButton {
-        //% blockId="Press" block="按下"
-        Press = 0,
-        //% blockId="Realse" block="松开"
-        Realse = 1
-    }
-
-    //% blockId=mbit_TouchPad block="TouchPad|pin %pin|value %value"
-    //% weight=100
-    //% blockGap=10
-    //% color="#808080"
-    //% name.fieldEditor="gridpicker" name.fieldOptions.columns=5
-    export function TouchPad(pin: DigitalPin, value: enTouch): boolean {
-
-        pins.setPull(pin, PinPullMode.PullUp);
-        if (pins.digitalReadPin(pin) == value) {
-            return true;
-        }
-        else {
-            return false;
-        }
-
-    }
-    
-    //% blockId=mbit_Rocker block="Rocker|VRX %pin1|VRY %pin2|SW %pin3|value %value"
-    //% weight=100
-    //% blockGap=10
-    //% color="#808080"
-    export function Rocker(pin1: AnalogPin, pin2: AnalogPin, pin3: DigitalPin, value: enRocker): boolean {
-
-        pins.setPull(pin3, PinPullMode.PullUp);
-        let x = pins.analogReadPin(pin1);
-        let y = pins.analogReadPin(pin2);
-        let z = pins.digitalReadPin(pin3);
-        let now_state = enRocker.Nostate;
-
-        if (x < 100) // 上
-        {
-
-            now_state = enRocker.Up;
-
-        }
-        else if (x > 700) //
-        {
-
-            now_state = enRocker.Down;
-        }
-        else  // 左右
-        {
-            if (y < 100) //右
-            {
-                now_state = enRocker.Right;
-            }
-            else if (y > 700) //左
-            {
-                now_state = enRocker.Left;
-            }
-        }
-        if (z == 0)
-            now_state = enRocker.Press;
-        if (now_state == value)
-            return true;
-        else
-            return false;
-
-    }
-
-    //% blockId=mbit_Button block="Button|pin %pin|value %value"
-    //% weight=100
-    //% blockGap=10
-    //% color="#808080"
-    //% name.fieldEditor="gridpicker" name.fieldOptions.columns=5
-    export function Button(pin: DigitalPin, value: enButton): boolean {
-
-        pins.setPull(pin, PinPullMode.PullUp);
-        if (pins.digitalReadPin(pin) == value) {
-            return true;
-        }
-        else {
-            return false;
-        }
-
-    }  
-}
-
-/*****************************************************************************************************************************************
- *    音乐类 *****************************************************************************************************************************
- ****************************************************************************************************************************************/
-
-//% color="#D2691E" weight=22 icon="\uf001"
-namespace mbit_音乐类 {
-    export enum enBuzzer {
-
-        //% blockId="NoBeep" block="不响"
-        NoBeep = 0,
-        //% blockId="Beep" block="响"
-        Beep
-    }
-
-    //% blockId=mbit_Buzzer block="Buzzer|pin %pin|value %value"
-    //% weight=100
-    //% blockGap=10 
-    //% color="#D2691E"
-    //% value.min=0 value.max=1
-    //% name.fieldEditor="gridpicker" name.fieldOptions.columns=8
-    export function Buzzer(pin: DigitalPin, value: enBuzzer): void {
-
-        pins.setPull(pin, PinPullMode.PullNone);
-        pins.digitalWritePin(pin, value);
-
-    }
-
-}
-
-/*****************************************************************************************************************************************
- *    电机类 *****************************************************************************************************************************
- ****************************************************************************************************************************************/
-
-//% color="#0000CD" weight=21 icon="\uf185"
-namespace mbit_电机类 {
-
-    //% blockId=mbit_Fan block="Fan|pin %pin|speed %value"
-    //% weight=100
-    //% blockGap=10
-    //% color="#0000CD"
-    //% value.min=0 value.max=1023
-    //% name.fieldEditor="gridpicker" name.fieldOptions.columns=9
-    export function Fan(pin: AnalogPin, value: number): void {
-
-        pins.analogWritePin(pin, value);
-
-    }
-
-    //% blockId=mbit_Servo block="Servo|pin %pin|value %value"
-    //% weight=100
-    //% blockGap=10
-    //% color="#0000CD"
-    //% value.min=0 value.max=180
-    //% name.fieldEditor="gridpicker" name.fieldOptions.columns=9
-    export function Servo(pin: AnalogPin, value: number): void {
-
-        pins.servoWritePin(pin, value);
-
-    }
-
-}
-
-//% color="#006400" weight=20 icon="\uf1b9"
-namespace mbit_小车类 {
-
-    const PCA9685_ADD = 0x41
-    const MODE1 = 0x00
-    const MODE2 = 0x01
-    const SUBADR1 = 0x02
-    const SUBADR2 = 0x03
-    const SUBADR3 = 0x04
-
-    const LED0_ON_L = 0x06
-    const LED0_ON_H = 0x07
-    const LED0_OFF_L = 0x08
-    const LED0_OFF_H = 0x09
-
-    const ALL_LED_ON_L = 0xFA
-    const ALL_LED_ON_H = 0xFB
-    const ALL_LED_OFF_L = 0xFC
-    const ALL_LED_OFF_H = 0xFD
-
-    const PRESCALE = 0xFE
-
-    let initialized = false
-    let yahStrip: neopixel.Strip;
-
-    export enum enColor {
-
-        //% blockId="OFF" block="灭"
-        OFF = 0,
-        //% blockId="Red" block="红色"
-        Red,
-        //% blockId="Green" block="绿色"
-        Green,
-        //% blockId="Blue" block="蓝色"
-        Blue,
-        //% blockId="White" block="白色"
-        White,
-        //% blockId="Cyan" block="青色"
-        Cyan,
-        //% blockId="Pinkish" block="品红"
-        Pinkish,
-        //% blockId="Yellow" block="黄色"
-        Yellow,
-
-    }
-    export enum enMusic {
-
-        dadadum = 0,
-        entertainer,
-        prelude,
-        ode,
-        nyan,
-        ringtone,
-        funk,
-        blues,
-
-        birthday,
-        wedding,
-        funereal,
-        punchline,
-        baddy,
-        chase,
-        ba_ding,
-        wawawawaa,
-        jump_up,
-        jump_down,
-        power_up,
-        power_down
-    }
-    export enum enPos {
-
-        //% blockId="LeftState" block="左边状态"
-        LeftState = 0,
-        //% blockId="RightState" block="右边状态"
-        RightState = 1
-    }
-
-    export enum enLineState {
-        //% blockId="White" block="白线"
-        White = 0,
-        //% blockId="Black" block="黑线"
-        Black = 1
-
-    }
-    
-    export enum enAvoidState {
-        //% blockId="OBSTACLE" block="有障碍物"
-        OBSTACLE = 0,
-        //% blockId="NOOBSTACLE" block="无障碍物"
-        NOOBSTACLE = 1
-
-    }
-
-    
-    export enum enServo {
-        
-        S1 = 1,
-        S2,
-        S3
-    }
-    export enum CarState {
-        //% blockId="Car_Run" block="前行"
-        Car_Run = 1,
-        //% blockId="Car_Back" block="后退"
-        Car_Back = 2,
-        //% blockId="Car_Left" block="左转"
-        Car_Left = 3,
-        //% blockId="Car_Right" block="右转"
-        Car_Right = 4,
-        //% blockId="Car_Stop" block="停止"
-        Car_Stop = 5,
-        //% blockId="Car_SpinLeft" block="原地左旋"
-        Car_SpinLeft = 6,
-        //% blockId="Car_SpinRight" block="原地右旋"
-        Car_SpinRight = 7
-    }
-
-    function i2cwrite(addr: number, reg: number, value: number) {
-        let buf = pins.createBuffer(2)
-        buf[0] = reg
-        buf[1] = value
-        pins.i2cWriteBuffer(addr, buf)
-    }
-
-    function i2ccmd(addr: number, value: number) {
-        let buf = pins.createBuffer(1)
-        buf[0] = value
-        pins.i2cWriteBuffer(addr, buf)
-    }
-
-    function i2cread(addr: number, reg: number) {
-        pins.i2cWriteNumber(addr, reg, NumberFormat.UInt8BE);
-        let val = pins.i2cReadNumber(addr, NumberFormat.UInt8BE);
-        return val;
-    }
-
-    function initPCA9685(): void {
-        i2cwrite(PCA9685_ADD, MODE1, 0x00)
-        setFreq(50);
-        initialized = true
-    }
-
-    function setFreq(freq: number): void {
-        // Constrain the frequency
-        let prescaleval = 25000000;
-        prescaleval /= 4096;
-        prescaleval /= freq;
-        prescaleval -= 1;
-        let prescale = prescaleval; //Math.Floor(prescaleval + 0.5);
-        let oldmode = i2cread(PCA9685_ADD, MODE1);
-        let newmode = (oldmode & 0x7F) | 0x10; // sleep
-        i2cwrite(PCA9685_ADD, MODE1, newmode); // go to sleep
-        i2cwrite(PCA9685_ADD, PRESCALE, prescale); // set the prescaler
-        i2cwrite(PCA9685_ADD, MODE1, oldmode);
-        control.waitMicros(5000);
-        i2cwrite(PCA9685_ADD, MODE1, oldmode | 0xa1);
-    }
-
-    function setPwm(channel: number, on: number, off: number): void {
-        if (channel < 0 || channel > 15)
-            return;
-        if (!initialized) {
-            initPCA9685();
-        }
-        let buf = pins.createBuffer(5);
-        buf[0] = LED0_ON_L + 4 * channel;
-        buf[1] = on & 0xff;
-        buf[2] = (on >> 8) & 0xff;
-        buf[3] = off & 0xff;
-        buf[4] = (off >> 8) & 0xff;
-        pins.i2cWriteBuffer(PCA9685_ADD, buf);
-    }
-
-
-    function Car_run(speed1: number, speed2: number) {
-
-        speed1 = speed1 * 16; // map 350 to 4096
-        speed2 = speed2 * 16;
-        if (speed1 >= 4096) {
-            speed1 = 4095
-        }
-        if (speed2 >= 4096) {
-            speed2 = 4095
-        }
-
-        setPwm(12, 0, speed1);
-        setPwm(13, 0, 0);
-
-        setPwm(15, 0, speed2);
-        setPwm(14, 0, 0);
-        //pins.digitalWritePin(DigitalPin.P16, 1);
-       // pins.analogWritePin(AnalogPin.P1, 1023-speed); //速度控制
-
-       // pins.analogWritePin(AnalogPin.P0, speed);//速度控制
-       // pins.digitalWritePin(DigitalPin.P8, 0);
-    }
-
-    function Car_back(speed1: number, speed2: number) {
-
-        speed1 = speed1 * 16; // map 350 to 4096
-        speed2 = speed2 * 16;
-        if (speed1 >= 4096) {
-            speed1 = 4095
-        }
-        if (speed2 >= 4096) {
-            speed2 = 4095
-        }
-        setPwm(12, 0, 0);
-        setPwm(13, 0, speed1);
-
-        setPwm(15, 0, 0);
-        setPwm(14, 0, speed2);
-
-        //pins.digitalWritePin(DigitalPin.P16, 0);
-        //pins.analogWritePin(AnalogPin.P1, speed); //速度控制
-
-        //pins.analogWritePin(AnalogPin.P0, 1023 - speed);//速度控制
-        //pins.digitalWritePin(DigitalPin.P8, 1);
-    }
-
-    function Car_left(speed1: number, speed2: number) {
-
-        speed1 = speed1 * 16; // map 350 to 4096
-        speed2 = speed2 * 16;
-        if (speed1 >= 4096) {
-            speed1 = 4095
-        }
-        if (speed2 >= 4096) {
-            speed2 = 4095
-        }
-        
-        setPwm(12, 0, speed1);
-        setPwm(13, 0, 0);
-
-        setPwm(15, 0, speed2);
-        setPwm(14, 0, 0);
-
-        //pins.analogWritePin(AnalogPin.P0, speed);
-        //pins.digitalWritePin(DigitalPin.P8, 0);
-
-        //pins.digitalWritePin(DigitalPin.P16, 0);
-        //pins.digitalWritePin(DigitalPin.P1, 0);
-    }
-
-    function Car_right(speed1: number, speed2: number) {
-
-        speed1 = speed1 * 16; // map 350 to 4096
-        speed2 = speed2 * 16;
-        if (speed1 >= 4096) {
-            speed1 = 4095
-        }
-        if (speed2 >= 4096) {
-            speed2 = 4095
-        }
-        
-        setPwm(12, 0, speed1);
-        setPwm(13, 0, 0);
-
-        setPwm(15, 0, speed2);
-        setPwm(14, 0, 0);
-        //pins.digitalWritePin(DigitalPin.P0, 0);
-        //pins.digitalWritePin(DigitalPin.P8, 0);
-
-        //pins.digitalWritePin(DigitalPin.P16, 1);
-       // pins.analogWritePin(AnalogPin.P1, 1023 - speed);
-    }
-
-    function Car_stop() {
-       
-        setPwm(12, 0, 0);
-        setPwm(13, 0, 0);
-
-        setPwm(15, 0, 0);
-        setPwm(14, 0, 0);
-        //pins.digitalWritePin(DigitalPin.P0, 0);
-        //pins.digitalWritePin(DigitalPin.P8, 0);
-        //pins.digitalWritePin(DigitalPin.P16, 0);
-        //pins.digitalWritePin(DigitalPin.P1, 0);
-    }
-
-    function Car_spinleft(speed1: number, speed2: number) {
-
-        speed1 = speed1 * 16; // map 350 to 4096
-        speed2 = speed2 * 16;
-        if (speed1 >= 4096) {
-            speed1 = 4095
-        }
-        if (speed2 >= 4096) {
-            speed2 = 4095
-        }        
-        
-        setPwm(12, 0, 0);
-        setPwm(13, 0, speed1);
-
-        setPwm(15, 0, speed2);
-        setPwm(14, 0, 0);
-
-        //pins.analogWritePin(AnalogPin.P0, speed);
-        //pins.digitalWritePin(DigitalPin.P8, 0);
-
-        //pins.digitalWritePin(DigitalPin.P16, 0);
-        //pins.analogWritePin(AnalogPin.P1, speed);
-    } 
-
-    function Car_spinright(speed1: number, speed2: number) {
-
-        speed1 = speed1 * 16; // map 350 to 4096
-        speed2 = speed2 * 16;
-        if (speed1 >= 4096) {
-            speed1 = 4095
-        }
-        if (speed2 >= 4096) {
-            speed2 = 4095
-        }      
-        setPwm(12, 0, speed1);
-        setPwm(13, 0, 0);
-
-        setPwm(15, 0, 0);
-        setPwm(14, 0, speed2);
-        //pins.analogWritePin(AnalogPin.P0, 1023-speed);
-        //pins.digitalWritePin(DigitalPin.P8, 1);
-
-        //pins.digitalWritePin(DigitalPin.P16, 1);
-        //pins.analogWritePin(AnalogPin.P1, 1023-speed);
-
-    }
-
-    /**
-     * *****************************************************************
-     * @param index
-     */
-    //% blockId=mbit_RGB_Car_Big2 block="RGB_Car_Big2|value %value"
-    //% weight=101
-    //% blockGap=10
-    //% color="#C814B8"
-    //% name.fieldEditor="gridpicker" name.fieldOptions.columns=4
-    export function RGB_Car_Big2(value: enColor): void {
-
-        switch (value) {
-            case enColor.OFF: {
-                setPwm(0, 0, 0);
-                setPwm(1, 0, 0);
-                setPwm(2, 0, 0);
-                break;
-            }
-            case enColor.Red: {
-                setPwm(0, 0, 4095);
-                setPwm(1, 0, 0);
-                setPwm(2, 0, 0);
-                break;
-            }
-            case enColor.Green: {
-                setPwm(0, 0, 0);
-                setPwm(1, 0, 4095);
-                setPwm(2, 0, 0);
-                break;
-            }
-            case enColor.Blue: {
-                setPwm(0, 0, 0);
-                setPwm(1, 0, 0);
-                setPwm(2, 0, 4095);
-                break;
-            }
-            case enColor.White: {
-                setPwm(0, 0, 4095);
-                setPwm(1, 0, 4095);
-                setPwm(2, 0, 4095);
-                break;
-            }
-            case enColor.Cyan: {
-                setPwm(0, 0, 0);
-                setPwm(1, 0, 4095);
-                setPwm(2, 0, 4095);
-                break;
-            }
-            case enColor.Pinkish: {
-                setPwm(0, 0, 4095);
-                setPwm(1, 0, 0);
-                setPwm(2, 0, 4095);
-                break;
-            }
-            case enColor.Yellow: {
-                setPwm(0, 0, 4095);
-                setPwm(1, 0, 4095);
-                setPwm(2, 0, 0);
-                break;
-            }
-        }
-    }
-    //% blockId=mbit_RGB_Car_Big block="RGB_Car_Big|value1 %value1|value2 %value2|value3 %value3"
-    //% weight=100
-    //% blockGap=10
-    //% color="#C814B8"
-    //% value1.min=0 value1.max=255 value2.min=0 value2.max=255 value3.min=0 value3.max=255
-    //% name.fieldEditor="gridpicker" name.fieldOptions.columns=4
-    export function RGB_Car_Big(value1: number, value2: number, value3: number): void {
-
-        let R = value1 * 16;
-        let G = value2 * 16;
-        let B = value3 * 16;
-
-        if (R > 4096)
-            R = 4095;
-        if (G > 4096)
-            G = 4095;
-        if (B > 4096)
-            B = 4095;
-
-        setPwm(0, 0, R);
-        setPwm(1, 0, G);
-        setPwm(2, 0, B);
-
-    }
-
-    //% blockId=mbit_RGB_Car_Program block="RGB_Car_Program"
-    //% weight=99
-    //% blockGap=10
-    //% color="#C814B8"
-    //% name.fieldEditor="gridpicker" name.fieldOptions.columns=4
-    export function RGB_Car_Program(): neopixel.Strip {
-         
-        if (!yahStrip) {
-            yahStrip = neopixel.create(DigitalPin.P16, 3, NeoPixelMode.RGB);
-        }
-        return yahStrip;  
-    }
-
-
-	//% blockId=mbit_ultrasonic_car block="ultrasonic return distance(cm)"
-    //% color="#006400"
-    //% weight=98
-    //% blockGap=10
-    //% name.fieldEditor="gridpicker" name.fieldOptions.columns=4
-    export function Ultrasonic_Car(): number {
-
-        // send pulse
-        pins.setPull(DigitalPin.P14, PinPullMode.PullNone);
-        pins.digitalWritePin(DigitalPin.P14, 0);
-        control.waitMicros(2);
-        pins.digitalWritePin(DigitalPin.P14, 1);
-        control.waitMicros(15);
-        pins.digitalWritePin(DigitalPin.P14, 0);
-
-        // read pulse
-        let d = pins.pulseIn(DigitalPin.P15, PulseValue.High, 43200);
-        return  Math.floor(d / 58);
-    }
-
-    //% blockId=mbit_Music_Car block="Music_Car|%index"
-    //% weight=97
-    //% blockGap=10
-    //% color="#006400"
-    //% name.fieldEditor="gridpicker" name.fieldOptions.columns=4
-    export function Music_Car(index: enMusic): void {
-        switch (index) {
-            case enMusic.dadadum: music.beginMelody(music.builtInMelody(Melodies.Dadadadum), MelodyOptions.Once); break;
-            case enMusic.birthday: music.beginMelody(music.builtInMelody(Melodies.Birthday), MelodyOptions.Once); break;
-            case enMusic.entertainer: music.beginMelody(music.builtInMelody(Melodies.Entertainer), MelodyOptions.Once); break;
-            case enMusic.prelude: music.beginMelody(music.builtInMelody(Melodies.Prelude), MelodyOptions.Once); break;
-            case enMusic.ode: music.beginMelody(music.builtInMelody(Melodies.Ode), MelodyOptions.Once); break;
-            case enMusic.nyan: music.beginMelody(music.builtInMelody(Melodies.Nyan), MelodyOptions.Once); break;
-            case enMusic.ringtone: music.beginMelody(music.builtInMelody(Melodies.Ringtone), MelodyOptions.Once); break;
-            case enMusic.funk: music.beginMelody(music.builtInMelody(Melodies.Funk), MelodyOptions.Once); break;
-            case enMusic.blues: music.beginMelody(music.builtInMelody(Melodies.Blues), MelodyOptions.Once); break;
-            case enMusic.wedding: music.beginMelody(music.builtInMelody(Melodies.Wedding), MelodyOptions.Once); break;
-            case enMusic.funereal: music.beginMelody(music.builtInMelody(Melodies.Funeral), MelodyOptions.Once); break;
-            case enMusic.punchline: music.beginMelody(music.builtInMelody(Melodies.Punchline), MelodyOptions.Once); break;
-            case enMusic.baddy: music.beginMelody(music.builtInMelody(Melodies.Baddy), MelodyOptions.Once); break;
-            case enMusic.chase: music.beginMelody(music.builtInMelody(Melodies.Chase), MelodyOptions.Once); break;
-            case enMusic.ba_ding: music.beginMelody(music.builtInMelody(Melodies.BaDing), MelodyOptions.Once); break;
-            case enMusic.wawawawaa: music.beginMelody(music.builtInMelody(Melodies.Wawawawaa), MelodyOptions.Once); break;
-            case enMusic.jump_up: music.beginMelody(music.builtInMelody(Melodies.JumpUp), MelodyOptions.Once); break;
-            case enMusic.jump_down: music.beginMelody(music.builtInMelody(Melodies.JumpDown), MelodyOptions.Once); break;
-            case enMusic.power_up: music.beginMelody(music.builtInMelody(Melodies.PowerUp), MelodyOptions.Once); break;
-            case enMusic.power_down: music.beginMelody(music.builtInMelody(Melodies.PowerDown), MelodyOptions.Once); break;
-        }
-    }
-    //% blockId=mbit_Servo_Car block="Servo_Car|num %num|value %value"
-    //% weight=96
-    //% blockGap=10
-    //% color="#006400"
-    //% num.min=1 num.max=3 value.min=0 value.max=180
-    //% name.fieldEditor="gridpicker" name.fieldOptions.columns=9
-    export function Servo_Car(num: enServo, value: number): void {
-
-        // 50hz: 20,000 us
-        let us = (value * 1800 / 180 + 600); // 0.6 ~ 2.4
-        let pwm = us * 4096 / 20000;
-        setPwm(num + 2, 0, pwm);
-
-    }
-
-    //% blockId=mbit_Avoid_Sensor block="Avoid_Sensor|value %value"
-    //% weight=95
-    //% blockGap=10
-    //% color="#006400"
-    //% name.fieldEditor="gridpicker" name.fieldOptions.columns=12
-    export function Avoid_Sensor(value: enAvoidState): boolean {
-
-        let temp: boolean = false;
-        pins.digitalWritePin(DigitalPin.P9, 0);
-        switch (value) {
-            case enAvoidState.OBSTACLE: {
-                if (pins.analogReadPin(AnalogPin.P3) < 800) {
-                
-                    temp = true;
-                    setPwm(8, 0, 0);
-                }
-                else {                 
-                    temp = false;
-                    setPwm(8, 0, 4095);
-                }
-                break;
-            }
-
-            case enAvoidState.NOOBSTACLE: {
-                if (pins.analogReadPin(AnalogPin.P3) > 800) {
-
-                    temp = true;
-                    setPwm(8, 0, 4095);
-                }
-                else {
-                    temp = false;
-                    setPwm(8, 0, 0);
-                }
-                break;
-            }
-        }
-        pins.digitalWritePin(DigitalPin.P9, 1);
-        return temp;
-
-    }
-    //% blockId=mbit_Line_Sensor block="Line_Sensor|direct %direct|value %value"
-    //% weight=94
-    //% blockGap=10
-    //% color="#006400"
-    //% name.fieldEditor="gridpicker" name.fieldOptions.columns=12
-    export function Line_Sensor(direct: enPos, value: enLineState): boolean {
-
-        let temp: boolean = false;
-
-        switch (direct) {
-            case enPos.LeftState: {
-                if (pins.analogReadPin(AnalogPin.P2) < 500) {
-                    if (value == enLineState.White) {
-                        temp = true;
-                    }
-                    setPwm(7, 0, 4095);
-                }
-                else {
-                    if (value == enLineState.Black) {
-                        temp = true;
-                    }
-                    setPwm(7, 0, 0);
-                }
-                break;
-            }
-
-            case enPos.RightState: {
-                if (pins.analogReadPin(AnalogPin.P1) < 500) {
-                    if (value == enLineState.White) {
-                        temp = true;
-                    }
-                    setPwm(6, 0, 4095);
-                }
-                else {
-                    if (value == enLineState.Black) {
-                        temp = true;
-                    }
-                    setPwm(6, 0, 0);
-                }
-                break;
-            }
-        }
-        return temp;
-
-    }
-    //% blockId=mbit_CarCtrl block="CarCtrl|%index"
-    //% weight=93
-    //% blockGap=10
-    //% color="#006400"
-    //% name.fieldEditor="gridpicker" name.fieldOptions.columns=10
-    export function CarCtrl(index: CarState): void {
-        switch (index) {
-            case CarState.Car_Run: Car_run(255, 255); break;
-            case CarState.Car_Back: Car_back(255, 255); break;
-            case CarState.Car_Left: Car_left(0, 255); break;
-            case CarState.Car_Right: Car_right(255, 0); break;
-            case CarState.Car_Stop: Car_stop(); break;
-            case CarState.Car_SpinLeft: Car_spinleft(255, 255); break;
-            case CarState.Car_SpinRight: Car_spinright(255, 255); break;
-        }
-    }
-    //% blockId=mbit_CarCtrlSpeed block="CarCtrlSpeed|%index|speed %speed"
-    //% weight=92
-    //% blockGap=10
-    //% speed.min=0 speed.max=255
-    //% color="#006400"
-    //% name.fieldEditor="gridpicker" name.fieldOptions.columns=10
-    export function CarCtrlSpeed(index: CarState, speed: number): void {
-        switch (index) {
-            case CarState.Car_Run: Car_run(speed, speed); break;
-            case CarState.Car_Back: Car_back(speed, speed); break;
-            case CarState.Car_Left: Car_left(speed, speed); break;
-            case CarState.Car_Right: Car_right(speed, speed); break;
-            case CarState.Car_Stop: Car_stop(); break;
-            case CarState.Car_SpinLeft: Car_spinleft(speed, speed); break;
-            case CarState.Car_SpinRight: Car_spinright(speed, speed); break;
-        }
-    }
-    //% blockId=mbit_CarCtrlSpeed2 block="CarCtrlSpeed2|%index|speed1 %speed1|speed2 %speed2"
-    //% weight=91
-    //% blockGap=10
-    //% speed1.min=0 speed1.max=255 speed2.min=0 speed2.max=255
-    //% color="#006400"
-    //% name.fieldEditor="gridpicker" name.fieldOptions.columns=10
-    export function CarCtrlSpeed2(index: CarState, speed1: number, speed2: number): void {
-        switch (index) {
-            case CarState.Car_Run: Car_run(speed1, speed2); break;
-            case CarState.Car_Back: Car_back(speed1, speed2); break;
-            case CarState.Car_Left: Car_left(speed1, speed2); break;
-            case CarState.Car_Right: Car_right(speed1, speed2); break;
-            case CarState.Car_Stop: Car_stop(); break;
-            case CarState.Car_SpinLeft: Car_spinleft(speed1, speed2); break;
-            case CarState.Car_SpinRight: Car_spinright(speed1, speed2); break;
-        }
+        return Math.floor(d / 58);
     }
 }
